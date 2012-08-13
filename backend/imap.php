@@ -60,6 +60,16 @@ class BackendIMAP extends BackendDiff {
     private $sinkfolders;
     private $sinkstates;
 
+    /**
+     * Indicates which AS version is supported by the backend.
+     *
+     * @access public
+     * @return string       AS version constant
+     */
+    public function GetSupportedASVersion() {
+        return ZPush::ASV_14;
+    }
+
     /**----------------------------------------------------------------------------------------------------------
      * default backend methods
      */
@@ -852,6 +862,119 @@ class BackendIMAP extends BackendDiff {
         return false;
     }
 
+
+    function getBodyPlain($message) {
+        $body = "";
+
+        $this->getBodyRecursive($message, "plain", $body);
+
+        return $body;
+    }
+
+    function getBodyHTML($message) {
+        $body = "";
+
+        $this->getBodyRecursive($message, "html", $body);
+
+        return $body;
+    }
+
+    /**
+     * Get body as mime
+     *
+     * @param Message           $message
+     * @param SyncObject        $output
+     *
+     * @access private
+     * @return boolean
+     */
+    private function getBodyMime($message, &$output) {
+
+        $body = $this->getBodyHTML($message);
+        $size = strlen($body);
+        if ($size == 0) {
+            return false;
+        }
+        ZLog::Write(LOGLEVEL_DEBUG, sprintf("getBodyMime size: %d",$size));
+        if ($size < MAX_EMBEDDED_SIZE) {
+            if (Request::GetProtocolVersion() >= 12.0) {
+                if (!isset($output->asbody))
+                    $output->asbody = new SyncBaseBody();
+                //TODO data should be wrapped in a MapiStreamWrapper
+                $output->asbody->data = $body;
+                $output->asbody->estimatedDataSize = $size;
+                $output->asbody->truncated = 0;
+            }
+            else {
+                $message->mimetruncated = 0;
+                // FIXME do it, but nodays most device supports AS > 12.0
+                //TODO mimedata should be a wrapped in a MapiStreamWrapper
+                //$message->mimedata = mapi_stream_read($mstream, MAX_EMBEDDED_SIZE);
+                //$message->mimesize = $mstreamstat["cb"];
+            }
+            unset($message->body, $message->bodytruncated);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns the message body for a required format
+     *
+     * @param MAPIMessage       $message
+     * @param int               $bpReturnType
+     * @param SyncObject        $output
+     *
+     * @access private
+     * @return boolean
+     */
+    private function setMessageBodyForType($message, $bpReturnType, &$output) {
+        ZLog::Write(LOGLEVEL_DEBUG, sprintf("setMessageBodyForType: %d",$bpReturnType));
+        $body = "";
+        $rt = $bpReturnType;
+        switch ($rt) {
+        case SYNC_BODYPREFERENCE_HTML:
+                $body = $this->getBodyHTML($message);
+                if ($body === "") {
+                    $rt = SYNC_BODYPREFERENCE_PLAIN;
+                    $body = $this->getBodyPlain($message);
+                }
+                break;
+            case SYNC_BODYPREFERENCE_MIME:
+                if ($this->getBodyMime($message, $output)) {
+                    $output->asbody->type = $rt;
+                    return true;
+                }
+            case SYNC_BODYPREFERENCE_PLAIN:
+                $rt = SYNC_BODYPREFERENCE_PLAIN;
+                $body = $this->getBodyPlain($message);
+                break;
+        }
+        $output->asbody = new SyncBaseBody();
+        $output->asbody->type = $rt;
+        $output->asbody->data = $body;
+        $output->asbody->estimatedDataSize = strlen($output->asbody->data);
+        return true;
+    }
+    /**
+     * Returns the best match of preferred body preference types.
+     *
+     * @param array             $bpTypes
+     *
+     * @access private
+     * @return int
+     */
+    private function getBodyPreferenceBestMatch($bpTypes) {
+        // Let's that for the moment we only support HTML or PLAIN ...
+        // The best choice is RTF, then HTML and then MIME in order to save bandwidth
+        // because MIME is a complete message including the headers and attachments
+        //if (in_array(SYNC_BODYPREFERENCE_RTF, $bpTypes))  return SYNC_BODYPREFERENCE_RTF;
+        if (in_array(SYNC_BODYPREFERENCE_HTML, $bpTypes)) return SYNC_BODYPREFERENCE_HTML;
+        //Well we don't support correctly yet MIME ...
+        //if (in_array(SYNC_BODYPREFERENCE_MIME, $bpTypes)) return SYNC_BODYPREFERENCE_MIME;
+        return SYNC_BODYPREFERENCE_PLAIN;
+    }
+
     /**
      * Returns a list (array) of messages
      *
@@ -942,22 +1065,48 @@ class BackendIMAP extends BackendDiff {
             $mobj = new Mail_mimeDecode($mail);
             $message = $mobj->decode(array('decode_headers' => true, 'decode_bodies' => true, 'include_bodies' => true, 'charset' => 'utf-8'));
 
+            $body = $this->getBody($message);
             $output = new SyncMail();
 
-            $body = $this->getBody($message);
-            $output->bodysize = strlen($body);
+            $bpTypes = $contentparameters->GetBodyPreference();
+            if ($bpTypes !== false) {
+                ZLog::Write(LOGLEVEL_DEBUG, sprintf("BodyPreference types: %s", implode(', ', $bpTypes)));
+                //do not send mime data if the client requests it
+                if (($contentparameters->GetMimeSupport() == SYNC_MIMESUPPORT_NEVER) && ($key = array_search(SYNC_BODYPREFERENCE_MIME, $bpTypes)!== false)) {
+                    unset($bpTypes[$key]);
+                    ZLog::Write(LOGLEVEL_DEBUG, sprintf("Remove mime body preference type because the device required no mime support. BodyPreference types: %s", implode(', ', $bpTypes)));
+                }
+                //get the best fitting preference type
+                $bpReturnType = $this->getBodyPreferenceBestMatch($bpTypes);
+                ZLog::Write(LOGLEVEL_DEBUG, sprintf("getBodyPreferenceBestMatch: %d", $bpReturnType));
+                $bpo = $contentparameters->BodyPreference($bpReturnType);
+                ZLog::Write(LOGLEVEL_DEBUG, sprintf("bpo: truncation size:'%d', allornone:'%d', preview:'%d'", $bpo->GetTruncationSize(), $bpo->GetAllOrNone(), $bpo->GetPreview()));
 
-            // truncate body, if requested
-            if(strlen($body) > $truncsize) {
-                $body = Utils::Utf8_truncate($body, $truncsize);
-                $output->bodytruncated = 1;
-            } else {
-                $body = $body;
-                $output->bodytruncated = 0;
+                $this->setMessageBodyForType($message, $bpReturnType, $output);
+                //ZLog::Write(LOGLEVEL_DEBUG, sprintf("AsBody before truncation: %s",$output->asbody->data));
+                //only set the truncation size data if device set it in request
+                if ($bpo->GetTruncationSize() != false && $bpReturnType != SYNC_BODYPREFERENCE_MIME && $output->asbody->estimatedDataSize > $bpo->GetTruncationSize()) {
+                    $output->asbody->data = Utils::Utf8_truncate($message->asbody->data, $bpo->GetTruncationSize());
+                    $output->asbody->truncated = 1;
+                }
+                //ZLog::Write(LOGLEVEL_DEBUG, sprintf("AsBody2: %s",$output->asbody->data));
             }
-            $body = str_replace("\n","\r\n", str_replace("\r","",$body));
+            else {
+                $output->bodysize = strlen($body);
 
-            $output->body = $body;
+                // truncate body, if requested
+                if(strlen($body) > $truncsize) {
+                    $body = Utils::Utf8_truncate($body, $truncsize);
+                    $output->bodytruncated = 1;
+                } else {
+                    $body = $body;
+                    $output->bodytruncated = 0;
+                }
+                $body = str_replace("\n","\r\n", str_replace("\r","",$body));
+
+                $output->body = $body;
+                ZLog::Write(LOGLEVEL_DEBUG, sprintf("BackendIMAP->GetMessage('%s','%s'): %s", $folderid,  $id, $output->body));
+            }
             $output->datereceived = isset($message->headers["date"]) ? $this->cleanupDate($message->headers["date"]) : null;
             $output->messageclass = "IPM.Note";
             $output->subject = isset($message->headers["subject"]) ? $message->headers["subject"] : "";
@@ -1028,10 +1177,13 @@ class BackendIMAP extends BackendDiff {
                         if (!isset($output->attachments) || !is_array($output->attachments))
                             $output->attachments = array();
 
-                        $attachment = new SyncAttachment();
 
-                        if (isset($part->body))
-                            $attachment->attsize = strlen($part->body);
+                        if (Request::GetProtocolVersion() >= 12.0) {
+                            $attachment = new SyncBaseAttachment();
+                        }
+                        else {
+                            $attachment = new SyncAttachment();
+                        }
 
                         if(isset($part->d_parameters['filename']))
                             $attname = $part->d_parameters['filename'];
@@ -1041,11 +1193,32 @@ class BackendIMAP extends BackendDiff {
                             $attname = $part->headers['content-description'];
                         else $attname = "unknown attachment";
 
-                        $attachment->displayname = $attname;
-                        $attachment->attname = $folderid . ":" . $id . ":" . $i;
-                        $attachment->attmethod = 1;
-                        $attachment->attoid = isset($part->headers['content-id']) ? $part->headers['content-id'] : "";
-                        array_push($output->attachments, $attachment);
+                        if (Request::GetProtocolVersion() >= 12.0) {
+                            $attachment->filereference = $folderid . ":" . $id . ":" . $i;
+                            $attachment->attmethod = 1;
+                            if (isset($part->body))
+                                $attachment->estimatedDataSize = strlen($part->body);
+                            $attachment->displayname = $attname;
+                            if (isset($part->headers['content-id']))
+                                $attachment->contentid = $part->headers['content-id'];
+
+                            //FIXME handle inline attachment $attachment->isinline = 1;
+
+                            if(!isset($output->asattachments))
+                                $output->asattachments = array();
+
+                            array_push($output->asattachments, $attachment);
+                        }
+                        else {
+                            if (isset($part->body))
+                                $attachment->attsize = strlen($part->body);
+
+                            $attachment->displayname = $attname;
+                            $attachment->attname = $folderid . ":" . $id . ":" . $i;
+                            $attachment->attmethod = 1;
+                            $attachment->attoid = isset($part->headers['content-id']) ? $part->headers['content-id'] : "";
+                            array_push($output->attachments, $attachment);
+                        }
                     }
 
                 }
@@ -1053,6 +1226,7 @@ class BackendIMAP extends BackendDiff {
             // unset mimedecoder & mail
             unset($mobj);
             unset($mail);
+            ZLog::Write(LOGLEVEL_DEBUG, sprintf("BackendIMAP->GetMessage('%s','%s'): %s", $folderid,  $id, $output->body));
             return $output;
         }
 
