@@ -1012,7 +1012,14 @@ class BackendIMAP extends BackendDiff {
 
         $sequence = "1:*";
         if ($cutoffdate > 0) {
+            $time_start = microtime(true);
+            ZLog::Write(LOGLEVEL_INFO, sprintf("BackendIMAP->GetMessageList(%s): SINCE %s", $folderid, date("d-M-Y", $cutoffdate)));
             $search = @imap_search($this->mbox, "SINCE ". date("d-M-Y", $cutoffdate));
+            $time_end = microtime(true);
+            $time = $time_end - $time_start;
+            if ($time > 2) {
+                ZLog::Write(LOGLEVEL_INFO, sprintf("BackendIMAP->GetMessageList(): done in %d seconds", $time));
+            }
             if ($search !== false)
                 $sequence = implode(",", $search);
         }
