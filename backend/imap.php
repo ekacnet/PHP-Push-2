@@ -670,9 +670,16 @@ class BackendIMAP extends BackendDiff {
      */
     public function GetFolderList() {
         $folders = array();
-
+        $subscribed_folders = array();
         $list = @imap_getmailboxes($this->mbox, $this->server, "*");
+        $list2 = @imap_getsubscribed($this->mbox, $this->server, "*");
+        $i = 0;
         if (is_array($list)) {
+            if (is_array($list2)) {
+                foreach ($list2 as $val) {
+                    $subscribed_folders[substr($val->name, strlen($this->server))] = 1;
+                }
+            }
             // reverse list to obtain folders in right order
             $list = array_reverse($list);
 
@@ -690,6 +697,14 @@ class BackendIMAP extends BackendDiff {
                 else {
                     $box["mod"] = $imapid;
                     $box["parent"] = "0";
+                }
+                if (!isset($subscribed_folders[$imapid])) {
+                    ZLog::Write(LOGLEVEL_DEBUG, sprintf("%s is not subscribed", $imapid));
+                    $f = $this->GetFolder($box["id"]);
+                    /* Do not show non-subscribed mail folder */
+                    if ($f->type == SYNC_FOLDER_TYPE_USER_MAIL) {
+                        continue;
+                    }
                 }
                 $folders[]=$box;
             }
