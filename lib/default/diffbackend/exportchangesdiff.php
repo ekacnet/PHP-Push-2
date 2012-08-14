@@ -95,8 +95,18 @@ class ExportChangesDiff extends DiffState implements IExportChanges{
 
         if($this->folderid) {
             // Get the changes since the last sync
-            if(!isset($this->syncstate) || !$this->syncstate)
+            if(!isset($this->syncstate) || !$this->syncstate) {
+                /*
+                 * If it's the first time we do the sync and there is no cutoffdate
+                 * then set it to 1 day, subsequent call will take care of setting this
+                 * to the current value but only if we manage to do the first one
+                 * and this can not happen if the folder is too big and we try to get
+                 * all the emails.
+                 */
+                if (!isset($this->cutoffdate) || $this->cutoffdate == 0)
+                    $this->cutoffdate = Utils::GetCutOffDate(SYNC_FILTERTYPE_1DAY);
                 $this->syncstate = array();
+            }
 
             ZLog::Write(LOGLEVEL_DEBUG,sprintf("ExportChangesDiff->InitializeExporter(): Initializing message diff engine. '%d' messages in state", count($this->syncstate)));
 
