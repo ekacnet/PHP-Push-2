@@ -73,6 +73,12 @@ which contents are automatically processed during the webserver start (by
 default it is conf.d inside the /etc/apache2 or /etc/httpd depending on your
 distribution).
 
+To unable autodiscover add this line :
+
+    Alias /Autodiscover/Autodiscover.xml /usr/share/z-push/autodiscover.php
+
+If needed adapt the PUSH_SERVER_NAME variable in the configuration file.
+
 You have to reload your webserver after making these configurations.
 
 *WARNING* You CANNOT simply rename the z-push directory to
