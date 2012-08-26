@@ -749,6 +749,12 @@ class BackendIMAP extends BackendDiff {
             $folder->displayname = "Drafts";
             $folder->type = SYNC_FOLDER_TYPE_DRAFTS;
         }
+        else if($lid == "calendar") {
+            $folder->parentid = "0";
+            $folder->displayname = "Calendar";
+            $folder->type = SYNC_FOLDER_TYPE_CALENDAR;
+            $this->wasteID = $id;
+        }
         else if($lid == "trash") {
             $folder->parentid = "0";
             $folder->displayname = "Trash";
