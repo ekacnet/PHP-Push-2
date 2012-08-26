@@ -962,7 +962,7 @@ class BackendIMAP extends BackendDiff {
                 }
                 break;
             case SYNC_BODYPREFERENCE_MIME:
-                if ($this->getBodyMime($message, $output)) {
+                if ($output->asbody->data) {
                     $output->asbody->type = $rt;
                     return true;
                 }
@@ -992,7 +992,7 @@ class BackendIMAP extends BackendDiff {
         //if (in_array(SYNC_BODYPREFERENCE_RTF, $bpTypes))  return SYNC_BODYPREFERENCE_RTF;
         if (in_array(SYNC_BODYPREFERENCE_HTML, $bpTypes)) return SYNC_BODYPREFERENCE_HTML;
         //Well we don't support correctly yet MIME ...
-        //if (in_array(SYNC_BODYPREFERENCE_MIME, $bpTypes)) return SYNC_BODYPREFERENCE_MIME;
+        if (in_array(SYNC_BODYPREFERENCE_MIME, $bpTypes)) return SYNC_BODYPREFERENCE_MIME;
         return SYNC_BODYPREFERENCE_PLAIN;
     }
 
@@ -1066,6 +1066,56 @@ class BackendIMAP extends BackendDiff {
         return $messages;
     }
 
+    /** Create an array with content type parameters from MIME container
+     * @param MIMEChunk             $chunk           A chunk of a MIME message
+     *
+     * @access private
+     * @return array                Array with key/value for all the content type related
+     *                              parameters.
+     */
+    private function genCTArray($chunk)
+    {
+        $ct_array = array();
+        foreach(array("ctype_primary", "ctype_parameters") as $k) {
+            if (isset($chunk->$k)) {
+                $ct_array[$k] = $chunk->$k;
+            }
+        }
+        return $ct_array;
+    }
+
+
+    /**
+     * Recreate a MIME body out of all the message parts (if any)
+     *
+     * @param MIMEPartsArray         $parts              Array with all parts of a given container
+     * @param ContentTypeParameters  $headers            Array with content type parameters
+     *
+     * @access private
+     * @return string                body representation for the given container
+     */
+     private function recreateMIMEBody($parts, $headers)
+     {
+        $body = "";
+        if ($headers["ctype_primary"] == "multipart") {
+            foreach($parts as $part) {
+                $body .= "\r\n--".$headers["ctype_parameters"]["boundary"]."\r\n";
+                foreach(array("Content-Type", "Content-Transfer-Encoding", "Content-Disposition") as $k) {
+                        $body .= sprintf("%s: %s\r\n", $k, $part->headers[strtolower($k)]);
+                    }
+                $body .="\n";
+                if (isset($part->parts)) {
+                    $body .= $this->recreateMIMEBody($part->parts, $this->genCTArray($parts));
+                } else {
+                    $body .= trim($part->body);
+                    $body .="\r\n";
+                }
+            }
+            $body .= "--".$headers["ctype_parameters"]["boundary"]."--";
+        }
+        return $body;
+    }
+
     /**
      * Returns the actual SyncXXX object type.
      *
@@ -1091,9 +1141,6 @@ class BackendIMAP extends BackendDiff {
             $mail = @imap_fetchheader($this->mbox, $id, FT_UID) . @imap_body($this->mbox, $id, FT_PEEK | FT_UID);
 
             $mobj = new Mail_mimeDecode($mail);
-            $message = $mobj->decode(array('decode_headers' => true, 'decode_bodies' => true, 'include_bodies' => true, 'charset' => 'utf-8'));
-
-            $body = $this->getBody($message);
             $output = new SyncMail();
 
             $bpTypes = $contentparameters->GetBodyPreference();
@@ -1110,16 +1157,44 @@ class BackendIMAP extends BackendDiff {
                 $bpo = $contentparameters->BodyPreference($bpReturnType);
                 ZLog::Write(LOGLEVEL_DEBUG, sprintf("bpo: truncation size:'%d', allornone:'%d', preview:'%d'", $bpo->GetTruncationSize(), $bpo->GetAllOrNone(), $bpo->GetPreview()));
 
+                if ($bpReturnType == SYNC_BODYPREFERENCE_MIME) {
+                    $message = $mobj->decode(array('decode_headers' => true, 'decode_bodies' => false, 'include_bodies' => true, 'charset' => 'utf-8'));
+                    if (isset($message->parts)) {
+                        $body =  "This is a multi-part message in MIME format.".$this->recreateMIMEBody($message->parts, $this->genCTArray($message));
+                    } else {
+                        $body = $this->getBody($message);
+                    }
+                    $output->asbody = new SyncBaseBody();
+                    $headers = "";
+                    $mime_headers = array();
+                    $headers_set = $message->headers;
+                    foreach($headers_set as $k => $v) {
+                        if (is_array($v)) {
+                            foreach($v as $l) {
+                                $headers .= sprintf("%s: %s\n", $k, $l);
+                            }
+                        } else {
+                            $headers .= sprintf("%s: %s\n", $k, $v);
+                        }
+                    }
+                    $output->asbody->data = sprintf("%s\n%s", $headers, $body);
+                    //ZLog::Write(LOGLEVEL_INFO, $output->asbody->data);
+                } else {
+                    $message = $mobj->decode(array('decode_headers' => true, 'decode_bodies' => true, 'include_bodies' => true, 'charset' => 'utf-8'));
+                }
+
                 $this->setMessageBodyForType($message, $bpReturnType, $output);
-                //ZLog::Write(LOGLEVEL_DEBUG, sprintf("AsBody before truncation: %s",$output->asbody->data));
+                ZLog::Write(LOGLEVEL_DEBUG, sprintf("AsBody before truncation: %s",$output->asbody->data));
                 //only set the truncation size data if device set it in request
                 if ($bpo->GetTruncationSize() != false && $bpReturnType != SYNC_BODYPREFERENCE_MIME && $output->asbody->estimatedDataSize > $bpo->GetTruncationSize()) {
                     $output->asbody->data = Utils::Utf8_truncate($message->asbody->data, $bpo->GetTruncationSize());
                     $output->asbody->truncated = 1;
                 }
-                //ZLog::Write(LOGLEVEL_DEBUG, sprintf("AsBody2: %s",$output->asbody->data));
             }
             else {
+                $message = $mobj->decode(array('decode_headers' => true, 'decode_bodies' => true, 'include_bodies' => true, 'charset' => 'utf-8'));
+
+                $body = $this->getBody($message);
                 $output->bodysize = strlen($body);
 
                 // truncate body, if requested

@@ -188,6 +188,16 @@ class Mail_mimeDecode
         $this->_rfc822_bodies  = false;
     }
 
+    function raw_body()
+    {
+        return $this->_body;
+    }
+
+    function raw_header()
+    {
+        return $this->_header;
+    }
+
     /**
      * Begins the decoding process. If called statically
      * it will create an object and call the decode() method
