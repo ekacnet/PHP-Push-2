@@ -450,16 +450,20 @@ class BackendIMAP extends BackendDiff {
         // more debugging
         ZLog::Write(LOGLEVEL_DEBUG, "BackendIMAP->SendMail(): parsed message: ". print_r($message,1));
         ZLog::Write(LOGLEVEL_DEBUG, "BackendIMAP->SendMail(): headers: $headers");
-        ZLog::Write(LOGLEVEL_DEBUG, "BackendIMAP->SendMail(): subject: {$message->headers["subject"]}");
+        if (isset($message->headers["subject"])) {
+            ZLog::Write(LOGLEVEL_DEBUG, "BackendIMAP->SendMail(): subject: {$message->headers["subject"]}");
+        } else {
+            ZLog::Write(LOGLEVEL_DEBUG, "BackendIMAP->SendMail(): subject: [EMPTY]");
+        }
         ZLog::Write(LOGLEVEL_DEBUG, "BackendIMAP->SendMail(): body: $body");
-
-        if (!defined('IMAP_USE_IMAPMAIL') || IMAP_USE_IMAPMAIL == true) {
+        if (isset($message->headers["subject"]) &&
+            (!defined('IMAP_USE_IMAPMAIL') || IMAP_USE_IMAPMAIL == true)) {
             $send =  @imap_mail ( $toaddr, $message->headers["subject"], $body, $headers, $ccaddr, $bccaddr);
         }
         else {
             if (!empty($ccaddr))  $headers .= "\nCc: $ccaddr";
             if (!empty($bccaddr)) $headers .= "\nBcc: $bccaddr";
-            $send =  @mail ( $toaddr, $message->headers["subject"], $body, $headers, $envelopefrom );
+            $send =  @mail ( $toaddr, isset($message->headers["subject"])?$message->headers["subject"]:NULL, $body, $headers, $envelopefrom );
         }
 
         // email sent?
@@ -469,7 +473,9 @@ class BackendIMAP extends BackendDiff {
         // add message to the sent folder
         // build complete headers
         $headers .= "\nTo: $toaddr";
-        $headers .= "\nSubject: " . $message->headers["subject"];
+        if (isset($message->headers["subject"])) {
+            $headers .= "\nSubject: " . $message->headers["subject"];
+        }
 
         if (!defined('IMAP_USE_IMAPMAIL') || IMAP_USE_IMAPMAIL == true) {
             if (!empty($ccaddr))  $headers .= "\nCc: $ccaddr";
