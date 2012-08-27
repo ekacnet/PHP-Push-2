@@ -118,6 +118,10 @@
     // This can also be disabled by setting it to false
     define('SINK_FORCERECHECK', 300);
 
+    // Push server name to return to the client during the autodiscover step
+    // if empty the server's name will be guessed from the gethostname() call
+    define('PUSH_SERVER_NAME', "");
+
 /**********************************************************************************
  *  Backend settings
  */

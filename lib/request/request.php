@@ -95,6 +95,8 @@ class Request {
     static private $occurence; //TODO
     static private $saveInSent;
     static private $acceptMultipart;
+    static private $request_uri;
+    static private $email;
 
 
     /**
@@ -130,6 +132,8 @@ class Request {
 
         if(isset($_SERVER["REQUEST_METHOD"]))
             self::$method = self::filterEvilInput($_SERVER["REQUEST_METHOD"], self::LETTERS_ONLY);
+        if(isset($_SERVER["REQUEST_URI"]))
+            self::$request_uri = strtolower($_SERVER["REQUEST_URI"]);
         // TODO check IPv6 addresses
         if(isset($_SERVER["REMOTE_ADDR"]))
             self::$remoteAddr = self::filterEvilInput($_SERVER["REMOTE_ADDR"], self::NUMBERSDOT_ONLY);
@@ -557,6 +561,17 @@ class Request {
      */
     static public function GetContentLength() {
         return (isset(self::$headers["content-length"]))? (int) self::$headers["content-length"] : 0;
+    }
+
+
+    /**
+     * Returns the request uri
+     *
+     * @access public
+     * @return int
+     */
+    static public function GetURI() {
+        return (isset(self::$request_uri))? self::$request_uri :"";
     }
 
 

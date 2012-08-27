@@ -1,12 +1,13 @@
 <?php
 /***********************************************
-* File      :   exceptions.php
+* File      :   badautodiscoverxml.php
 * Project   :   Z-Push
-* Descr     :   Includes all Z-Push exceptions
+* Descr     :   Exception thrown if the request is not a POST request
+*               The code indicates if the request identified was a OPTIONS or GET request
 *
-* Created   :   06.02.2012
+* Created   :   20.08.2012
 *
-* Copyright 2007 - 2012 Zarafa Deutschland GmbH
+* Copyright 2012 - Matthieu Patou
 *
 * This program is free software: you can redistribute it and/or modify
 * it under the terms of the GNU Affero General Public License, version 3,
@@ -41,28 +42,10 @@
 * Consult LICENSE file for details
 ************************************************/
 
-// main exception
-include_once('zpushexception.php');
-
-// Fatal exceptions
-include_once('fatalexception.php');
-include_once('fatalmisconfigurationexception.php');
-include_once('fatalnotimplementedexception.php');
-include_once('wbxmlexception.php');
-include_once('nopostrequestexception.php');
-include_once('badautodiscoverxml.php');
-include_once('badautodiscoveremail.php');
-include_once('httpreturncodeexception.php');
-include_once('authenticationrequiredexception.php');
-include_once('provisioningrequiredexception.php');
-
-// Non fatal exceptions
-include_once('notimplementedexception.php');
-include_once('syncobjectbrokenexception.php');
-include_once('statusexception.php');
-include_once('statenotfoundexception.php');
-include_once('stateinvalidexception.php');
-include_once('nohierarchycacheavailableexception.php');
-include_once('statenotyetavailableexception.php');
+class BadAutodiscoverXML extends FatalException {
+    const OPTIONS_REQUEST = 1;
+    const GET_REQUEST = 2;
+    protected $defaultLogLevel = LOGLEVEL_DEBUG;
+}
 
 ?>
